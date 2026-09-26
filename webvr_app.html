@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>Inspektor Tomografii 3D VR - Pin & Mikropory</title>
+  
+  <!-- A-Frame VR Framework 1.6.0 -->
+  <script src="https://aframe.io/releases/1.6.0/aframe.min.js"></script>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+
+  <style>
+    body {
+      margin: 0;
+      overflow: hidden;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background-color: #030712;
+      user-select: none;
+    }
+    .glass-panel {
+      background: rgba(10, 16, 31, 0.88);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.6);
+    }
+    @keyframes pulse-ring {
+      0% { transform: scale(0.96); opacity: 0.7; }
+      50% { transform: scale(1.04); opacity: 0.25; }
+      100% { transform: scale(0.96); opacity: 0.7; }
+    }
+    .pulse-effect {
+      animation: pulse-ring 3s infinite ease-in-out;
+    }
+  </style>
+
+  <script>
+    // Bezpieczne rejestrowanie komponentu rotacji
+    AFRAME.registerComponent('auto-rotate', {
+      schema: {
+        speed: { type: 'number', default: 0.35 },
+        enabled: { type: 'boolean', default: true }
+      },
+      tick: function (time, timeDelta) {
+        if (!this.data.enabled) return;
+        const currentRotation = this.el.getAttribute('rotation') || { x: 0, y: 0, z: 0 };
+        this.el.setAttribute('rotation', {
+          x: currentRotation.x,
+          y: currentRotation.y + (this.data.speed * (timeDelta / 16.66)),
+          z: currentRotation.z
+        });
+      }
+    });
+
+    // Kontroler materiałów i optymalizacji dla wczytanego modelu GLTF/GLB
+    AFRAME.registerComponent('model-material-controller', {
+      schema: {
+        pinOpacity: { type: 'number', default: 0.3 },
+        pinWireframe: { type: 'boolean', default: false },
+        poresGlow: { type: 'number', default: 2.5 },
+        xrayMode: { type: 'boolean', default: false },
+        poreRatio: { type: 'number', default: 1.0 } // Filtrowanie widoczności porów
+      },
+      init: function () {
+        this.poreMeshes = [];
+        this.el.addEventListener('model-loaded', () => {
+          this.centerAndScaleModel();
+          this.setupPoreGeometryLOD();
+          this.applyMaterials();
+        });
+      },
+      update: function () {
+        this.applyMaterials();
+        this.updatePoreLOD();
+      },
+      centerAndScaleModel: function () {
+        const mesh = this.el.getObject3D('mesh');
+        if (!mesh) return;
+
+        try {
+          const bbox = new THREE.Box3().setFromObject(mesh);
+          const center = new THREE.Vector3();
+          const size = new THREE.Vector3();
+          bbox.getCenter(center);
+          bbox.getSize(size);
+
+          mesh.position.x = -center.x;
+          mesh.position.y = -center.y + (size.y / 2);
+          mesh.position.z = -center.z;
+
+          const maxDim = Math.max(size.x, size.y, size.z);
+          if (maxDim > 0) {
+            const targetScale = 1.6 / maxDim;
+            this.el.setAttribute('scale', `${targetScale} ${targetScale} ${targetScale}`);
+          }
+        } catch (err) {
+          console.warn('Centrowanie modelu:', err);
+        }
+      },
+      setupPoreGeometryLOD: function () {
+        const mesh = this.el.getObject3D('mesh');
+        if (!mesh) return;
+        this.poreMeshes = [];
+
+        mesh.traverse((node) => {
+          if (node.isMesh) {
+            const nodeName = (node.name || '').toLowerCase();
+            const matName = (node.material && node.material.name ? node.material.name : '').toLowerCase();
+            const isPore = nodeName.includes('por') || matName.includes('por') || matName.includes('glow');
+
+            if (isPore && node.geometry) {
+              this.poreMeshes.push(node);
+              const geom = node.geometry;
+
+              // Przygotowanie losowo przetasowanego bufora trójkątów,
+              // aby redukcja drawRange próbkowała pory w całej objętości pinu
+              if (geom.index) {
+                const count = geom.index.count;
+                const triangleCount = Math.floor(count / 3);
+                const origIndices = geom.index.array;
+                const permuted = new origIndices.constructor(count);
+
+                const triIndices = new Uint32Array(triangleCount);
+                for (let i = 0; i < triangleCount; i++) triIndices[i] = i;
+
+                // Deterministyczne tasowanie LCG
+                let seed = 54321;
+                for (let i = triangleCount - 1; i > 0; i--) {
+                  seed = (seed * 1664525 + 1013904223) % 4294967296;
+                  const j = Math.floor((seed / 4294967296) * (i + 1));
+                  const tmp = triIndices[i];
+                  triIndices[i] = triIndices[j];
+                  triIndices[j] = tmp;
+                }
+
+                for (let i = 0; i < triangleCount; i++) {
+                  const srcTri = triIndices[i];
+                  permuted[i * 3] = origIndices[srcTri * 3];
+                  permuted[i * 3 + 1] = origIndices[srcTri * 3 + 1];
+                  permuted[i * 3 + 2] = origIndices[srcTri * 3 + 2];
+                }
+
+                geom.setIndex(new THREE.BufferAttribute(permuted, 1));
+                geom.userData.totalTriangles = triangleCount;
+              } else if (geom.attributes.position) {
+                geom.userData.totalTriangles = Math.floor(geom.attributes.position.count / 3);
+              }
+            }
+          }
+        });
+        this.updatePoreLOD();
+      },
+      updatePoreLOD: function () {
+        if (!this.poreMeshes || this.poreMeshes.length === 0) return;
+        const ratio = Math.max(0.15, this.data.poreRatio);
+
+        this.poreMeshes.forEach((node) => {
+          node.visible = true; // Nigdy nie ukrywamy całego obiektu
+          const geom = node.geometry;
+          if (geom && geom.userData.totalTriangles) {
+            const triCount = geom.userData.totalTriangles;
+            const drawTriangles = Math.max(200, Math.floor(triCount * ratio));
+            geom.setDrawRange(0, Math.min(triCount * 3, drawTriangles * 3));
+          }
+        });
+      },
+      applyMaterials: function () {
+        const mesh = this.el.getObject3D('mesh');
+        if (!mesh) return;
+
+        // Auto-kompensacja blasku: przy niższej gęstości pory świecą mocniej, by pozostać dobrze widoczne
+        const effectiveGlow = this.data.poresGlow * (1 + (1 - this.data.poreRatio) * 0.75);
+
+        mesh.traverse((node) => {
+          if (node.isMesh && node.material) {
+            const mat = node.material;
+            const nodeName = (node.name || '').toLowerCase();
+            const matName = (mat.name || '').toLowerCase();
+
+            const isPore = nodeName.includes('por') || matName.includes('por') || matName.includes('glow');
+            const isPin = !isPore;
+
+            if (isPin) {
+              mat.transparent = true;
+              mat.wireframe = this.data.pinWireframe;
+              mat.opacity = this.data.xrayMode ? 0.12 : this.data.pinOpacity;
+              mat.depthWrite = !this.data.xrayMode;
+              mat.roughness = 0.25;
+              mat.metalness = 0.8;
+              if (this.data.xrayMode) {
+                mat.color.setHex(0x38bdf8);
+              }
+            } else {
+              node.visible = true;
+              mat.wireframe = false;
+              mat.transparent = false;
+              mat.opacity = 1.0;
+              if (mat.emissive) {
+                mat.emissive.setHex(0xff2200);
+                mat.emissiveIntensity = effectiveGlow;
+              }
+            }
+            mat.needsUpdate = true;
+          }
+        });
+      }
+    });
+
+    // Komponent generujący poglądowy model tomografii
+    AFRAME.registerComponent('procedural-preview-pin', {
+      schema: {
+        density: { type: 'number', default: 1.0 }
+      },
+      init: function () {
+        const group = new THREE.Group();
+
+        // 1. Zewnętrzny korpus pinu
+        const pinGeo = new THREE.CylinderGeometry(0.35, 0.45, 2.2, 32);
+        this.pinMat = new THREE.MeshStandardMaterial({
+          color: 0x94a3b8,
+          metalness: 0.85,
+          roughness: 0.25,
+          transparent: true,
+          opacity: 0.32,
+          depthWrite: true
+        });
+        const pinMesh = new THREE.Mesh(pinGeo, this.pinMat);
+        pinMesh.position.y = 1.1;
+        group.add(pinMesh);
+
+        // 2. Chmura wewnętrznych mikroporów
+        this.maxPores = 600;
+        const poreGeo = new THREE.DodecahedronGeometry(0.016, 0);
+        this.poreMat = new THREE.MeshStandardMaterial({
+          color: 0xff3300,
+          emissive: 0xff2200,
+          emissiveIntensity: 2.5,
+          roughness: 0.3
+        });
+
+        this.instancedPores = new THREE.InstancedMesh(poreGeo, this.poreMat, this.maxPores);
+        const dummy = new THREE.Object3D();
+
+        for (let i = 0; i < this.maxPores; i++) {
+          const t = Math.random();
+          const y = 0.2 + t * 1.8;
+          const radiusMax = (0.35 * (1 - t) + 0.45 * t) * 0.75;
+          const r = Math.pow(Math.random(), 0.6) * radiusMax;
+          const theta = Math.random() * Math.PI * 2;
+
+          dummy.position.set(r * Math.cos(theta), y, r * Math.sin(theta));
+          const scale = 0.6 + Math.random() * 1.4;
+          dummy.scale.set(scale, scale, scale);
+          dummy.updateMatrix();
+          this.instancedPores.setMatrixAt(i, dummy.matrix);
+        }
+        this.instancedPores.instanceMatrix.needsUpdate = true;
+        this.instancedPores.count = Math.floor(this.maxPores * this.data.density);
+        group.add(this.instancedPores);
+
+        this.el.setObject3D('mesh', group);
+      },
+      update: function () {
+        if (this.instancedPores) {
+          // Gwarantujemy, że zawsze widoczna jest czytelna reprezentacja porów
+          const minCount = 120;
+          this.instancedPores.count = Math.max(minCount, Math.floor(this.maxPores * Math.max(0.2, this.data.density)));
+          this.instancedPores.instanceMatrix.needsUpdate = true;
+        }
+      },
+      updateOpacity: function (val, isXray) {
+        if (!this.pinMat) return;
+        this.pinMat.opacity = isXray ? 0.12 : val;
+        this.pinMat.color.setHex(isXray ? 0x38bdf8 : 0x94a3b8);
+        this.pinMat.needsUpdate = true;
+      },
+      updateWireframe: function (wf) {
+        if (!this.pinMat) return;
+        this.pinMat.wireframe = wf;
+        this.pinMat.needsUpdate = true;
+      },
+      updateGlow: function (val) {
+        if (!this.poreMat) return;
+        this.poreMat.emissiveIntensity = val;
+        this.poreMat.needsUpdate = true;
+      }
+    });
+  </script>
+</head>
+<body class="bg-gray-950 text-slate-100 h-screen w-screen overflow-hidden">
+
+  <a-scene
+    id="scene"
+    renderer="antialias: false; colorManagement: true; exposure: 1.1; powerPreference: high-performance; precision: mediump;"
+    vr-mode-ui="enabled: true"
+    embedded
+    class="w-full h-full absolute inset-0 z-0">
+
+    <!-- Oświetlenie inspekcyjne -->
+    <a-entity light="type: ambient; color: #1e293b; intensity: 1.2"></a-entity>
+    <a-entity light="type: directional; color: #38bdf8; intensity: 1.6; position: 3 6 4"></a-entity>
+    <a-entity light="type: directional; color: #f97316; intensity: 1.0; position: -3 -2 -3"></a-entity>
+
+    <!-- Postument i ring tomograficzny -->
+    <a-entity position="0 0 0">
+      <a-cylinder radius="1.3" height="0.08" color="#0f172a" position="0 0.04 0" material="roughness: 0.4; metalness: 0.7"></a-cylinder>
+      <a-torus radius="1.32" radius-tubular="0.015" rotation="90 0 0" position="0 0.08 0" color="#38bdf8" material="emissive: #38bdf8; emissiveIntensity: 0.8"></a-torus>
+      <a-ring radius-inner="1.55" radius-outer="1.58" rotation="-90 0 0" position="0 0.02 0" color="#0ea5e9" opacity="0.4" class="pulse-effect"></a-ring>
+    </a-entity>
+
+    <!-- Pivot obrotu modelu tomograficznego -->
+    <a-entity id="modelPivot" position="0 0.2 0" auto-rotate="speed: 0.35; enabled: true">
+      <!-- Obiekt proceduralny -->
+      <a-entity id="proceduralPin" procedural-preview-pin="density: 1.0" position="0 0 0"></a-entity>
+
+      <!-- Obiekt wczytany przez użytkownika z pliku GLB -->
+      <a-entity 
+        id="userModel" 
+        visible="false"
+        model-material-controller="pinOpacity: 0.32; pinWireframe: false; poresGlow: 2.5; xrayMode: false; poreRatio: 1.0"
+        position="0 0 0">
+      </a-entity>
+    </a-entity>
+
+    <!-- Kamera VR -->
+    <a-entity id="rig" position="0 1.5 2.6">
+      <a-camera 
+        id="camera" 
+        look-controls="reverseMouseDrag: false; touchEnabled: true" 
+        wasd-controls="fly: false; acceleration: 15">
+      </a-camera>
+    </a-entity>
+
+  </a-scene>
+
+  <div id="uiOverlay" class="relative z-10 pointer-events-none w-full h-full flex flex-col justify-between p-3 sm:p-5">
+    
+    <!-- Górny nagłówek z licznikiem FPS i profilem jakości -->
+    <header class="flex flex-wrap gap-2.5 justify-between items-start">
+      <div class="glass-panel rounded-2xl p-3.5 pointer-events-auto max-w-sm">
+        <div class="flex items-center justify-between gap-3">
+          <div class="flex items-center gap-2.5">
+            <div id="fpsDot" class="w-3 h-3 rounded-full bg-emerald-400"></div>
+            <h1 class="text-sm sm:text-base font-bold tracking-wider text-sky-400 uppercase flex items-center gap-1.5">
+              CT Voxel VR
+            </h1>
+          </div>
+          <!-- Licznik FPS i rozdzielczość -->
+          <div class="flex items-center gap-2 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-xs">
+            <span id="fpsDisplay" class="text-emerald-400 font-bold">60 FPS</span>
+            <span class="text-slate-500">|</span>
+            <span id="scaleDisplay" class="text-sky-300">1.0x</span>
+          </div>
+        </div>
+
+        <div class="mt-2.5 text-[11px] bg-slate-900/80 rounded-lg p-2 border border-slate-700/50 flex justify-between items-center">
+          <span class="text-slate-400">Model:</span>
+          <span id="modelNameBadge" class="text-sky-300 font-mono font-medium truncate max-w-[150px]">Demo Tomografii</span>
+        </div>
+      </div>
+
+      <!-- Pasek profilu skalowania i importu -->
+      <div class="flex items-center gap-2">
+        <!-- Suwak Ostrości / Rozdzielczości bufora (Sharpness) -->
+        <div class="glass-panel rounded-2xl px-3 py-2 pointer-events-auto flex items-center gap-2.5 shadow-lg text-xs">
+          <div class="flex flex-col gap-1">
+            <div class="flex justify-between items-center gap-3 text-[10px] text-slate-300 font-medium">
+              <span class="flex items-center gap-1">
+                <svg class="w-3.5 h-3.5 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="12" r="3"></circle>
+                  <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+                Ostrość VR
+              </span>
+              <span id="sliderResBadge" class="font-mono text-sky-400 font-bold">1.00x</span>
+            </div>
+            <input type="range" id="sliderResolution" min="0.01" max="2.0" step="0.01" value="1.0" class="w-28 sm:w-36 h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-sky-400">
+          </div>
+        </div>
+
+        <!-- Przycisk wczytania pliku -->
+        <div class="glass-panel rounded-2xl p-1.5 pointer-events-auto flex items-center shadow-lg">
+          <label for="glbFileInput" class="cursor-pointer bg-slate-800 hover:bg-slate-700 border border-slate-600/80 text-white text-xs font-semibold px-3 py-2 rounded-xl transition flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+            </svg>
+            <span class="hidden sm:inline">Wczytaj</span> .GLB
+          </label>
+          <input type="file" id="glbFileInput" accept=".glb,.gltf" class="hidden" />
+        </div>
+      </div>
+    </header>
+
+    <!-- Baner upuszczania plików -->
+    <div id="dropBanner" class="hidden pointer-events-none self-center bg-sky-500/20 border-2 border-dashed border-sky-400 rounded-3xl p-8 backdrop-blur-md text-center max-w-md my-auto">
+      <svg class="w-12 h-12 text-sky-400 mx-auto mb-3 animate-bounce" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/>
+      </svg>
+      <h3 class="text-lg font-bold text-sky-200">Upuść plik .GLB tutaj</h3>
+      <p class="text-xs text-sky-300/80 mt-1">Zostanie zoptymalizowany pod bieżący profil renderowania.</p>
+    </div>
+
+    <!-- Dolny pasek narzędzi i suwaków -->
+    <footer class="flex flex-col sm:flex-row gap-3 items-end justify-between">
+      
+      <!-- Panel kontrolny przezroczystości, świecenia i redukcji porów -->
+      <div class="glass-panel rounded-2xl p-3.5 pointer-events-auto w-full sm:w-auto max-w-md">
+        <div class="flex items-center justify-between mb-2.5 border-b border-slate-700/60 pb-2">
+          <span class="text-xs font-semibold uppercase tracking-wider text-slate-300 flex items-center gap-1.5">
+            <svg class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M12 3v1m0 16v1m9-9h-1M4 12H3m15.364 6.364l-.707-.707M6.343 6.343l-.707-.707m12.728 0l-.707.707M6.343 17.657l-.707.707"/>
+            </svg>
+            Optyka & Płynność
+          </span>
+          <button id="toggleRotateBtn" class="text-xs bg-slate-800 hover:bg-slate-700 text-sky-300 px-2.5 py-1 rounded-lg border border-slate-600 transition flex items-center gap-1">
+            <svg class="w-3 h-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M21.5 2v6h-6M21.34 15.57a10 10 0 1 1-.57-8.38l5.67-5.67"/>
+            </svg>
+            <span id="rotateBtnLabel">Pauza</span>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2 text-xs">
+          <!-- Tryb Rentgen -->
+          <button id="btnXray" class="bg-slate-800/80 hover:bg-slate-700 border border-slate-600/80 rounded-xl p-2 flex items-center gap-2 transition text-left">
+            <div class="font-bold text-slate-200">Rentgen</div>
+          </button>
+
+          <!-- Siatka Wireframe -->
+          <button id="btnWireframe" class="bg-slate-800/80 hover:bg-slate-700 border border-slate-600/80 rounded-xl p-2 flex items-center gap-2 transition text-left">
+            <div class="font-bold text-slate-200">Siatka korpusu</div>
+          </button>
+        </div>
+
+        <!-- Suwak gęstości porów (Kluczowy dla FPS w telefonie) -->
+        <div class="mt-2.5 bg-slate-900/60 p-2 rounded-xl border border-slate-800">
+          <div class="flex justify-between text-[11px] text-slate-300 mb-1">
+            <span class="flex items-center gap-1">
+              <span class="w-1.5 h-1.5 rounded-full bg-rose-400"></span>
+              Próbkowanie chmury porów (LOD)
+            </span>
+            <span id="poreDensityVal" class="font-mono text-rose-400 font-bold">100%</span>
+          </div>
+          <input type="range" id="sliderDensity" min="0.1" max="1.0" step="0.1" value="1.0" class="w-full accent-rose-500 cursor-pointer">
+          <div class="text-[9px] text-slate-400 mt-0.5">Zmniejsz do 30-50%, jeśli telefon zwalnia w trybie VR.</div>
+        </div>
+
+        <!-- Suwaki przezroczystości i blasku -->
+        <div class="mt-2">
+          <div class="flex justify-between text-[11px] text-slate-300 mb-0.5">
+            <span>Przezroczystość metalu</span>
+            <span id="opacityVal" class="font-mono text-sky-400">32%</span>
+          </div>
+          <input type="range" id="sliderOpacity" min="0" max="1" step="0.02" value="0.32" class="w-full accent-sky-400 cursor-pointer">
+        </div>
+
+        <div class="mt-1.5">
+          <div class="flex justify-between text-[11px] text-slate-300 mb-0.5">
+            <span>Blask porów (Emisja)</span>
+            <span id="glowVal" class="font-mono text-rose-400">2.5x</span>
+          </div>
+          <input type="range" id="sliderGlow" min="0" max="6" step="0.2" value="2.5" class="w-full accent-rose-500 cursor-pointer">
+        </div>
+      </div>
+
+      <!-- Karta VR Cardboard -->
+      <div class="glass-panel rounded-2xl p-3.5 pointer-events-auto max-w-xs text-xs">
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="flex items-center gap-1.5 text-amber-400 font-bold">
+            <svg class="w-4 h-4 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="6" cy="12" r="4"/><circle cx="18" cy="12" r="4"/><line x1="10" y1="12" x2="14" y2="12"/>
+            </svg>
+            <span>Tryb VR na telefon</span>
+          </div>
+          <span class="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded border border-amber-500/30">Auto-DRS</span>
+        </div>
+        <p class="text-slate-300 text-[11px] leading-relaxed">
+          Gdy wejdziesz w tryb <strong>VR</strong> (ikona w rogu), aplikacja w razie spadku poniżej 45 FPS automatycznie zmniejszy rozdzielczość bufora, aby wyeliminować mdłości i zacięcia głowy.
+        </p>
+      </div>
+
+    </footer>
+  </div>
+
+  <script>
+    const scene = document.getElementById('scene');
+    const userModel = document.getElementById('userModel');
+    const proceduralPin = document.getElementById('proceduralPin');
+    const modelPivot = document.getElementById('modelPivot');
+    const glbFileInput = document.getElementById('glbFileInput');
+    const modelNameBadge = document.getElementById('modelNameBadge');
+    const dropBanner = document.getElementById('dropBanner');
+
+    const sliderOpacity = document.getElementById('sliderOpacity');
+    const opacityVal = document.getElementById('opacityVal');
+    const sliderGlow = document.getElementById('sliderGlow');
+    const glowVal = document.getElementById('glowVal');
+    const sliderDensity = document.getElementById('sliderDensity');
+    const poreDensityVal = document.getElementById('poreDensityVal');
+
+    const sliderResolution = document.getElementById('sliderResolution');
+    const sliderResBadge = document.getElementById('sliderResBadge');
+    const fpsDisplay = document.getElementById('fpsDisplay');
+    const fpsDot = document.getElementById('fpsDot');
+    const scaleDisplay = document.getElementById('scaleDisplay');
+
+    const btnXray = document.getElementById('btnXray');
+    const btnWireframe = document.getElementById('btnWireframe');
+    const toggleRotateBtn = document.getElementById('toggleRotateBtn');
+    const rotateBtnLabel = document.getElementById('rotateBtnLabel');
+
+    let currentPinOpacity = 0.32;
+    let currentGlow = 2.5;
+    let currentDensity = 1.0;
+    let isWireframe = false;
+    let isXray = false;
+    let isRotating = true;
+    let isUserFileLoaded = false;
+
+    // --- Skalowanie Jakości (Płynny Suwak Pixel Ratio) ---
+    let currentResolutionMultiplier = 1.0;
+
+    function applyResolution(multiplier) {
+      currentResolutionMultiplier = multiplier;
+      const renderer = scene.renderer;
+      if (!renderer) return;
+
+      const deviceRatio = window.devicePixelRatio || 1;
+      const computedRatio = Math.min(2.5, Math.max(0.01, deviceRatio * multiplier));
+      
+      renderer.setPixelRatio(computedRatio);
+      
+      // Bezpieczna aktualizacja etykiet w UI
+      if (sliderResBadge) {
+        sliderResBadge.textContent = multiplier.toFixed(2) + 'x';
+        if (multiplier < 0.6) {
+          sliderResBadge.className = "font-mono text-amber-400 font-bold";
+        } else if (multiplier <= 1.25) {
+          sliderResBadge.className = "font-mono text-sky-400 font-bold";
+        } else {
+          sliderResBadge.className = "font-mono text-emerald-400 font-bold";
+        }
+      }
+
+      if (scaleDisplay) {
+        scaleDisplay.textContent = multiplier.toFixed(2) + 'x';
+      }
+    }
+
+    if (sliderResolution) {
+      sliderResolution.addEventListener('input', (e) => {
+        const val = parseFloat(e.target.value);
+        applyResolution(val);
+      });
+    }
+
+    // --- Monitor klatek na sekundę (FPS) & Opcjonalne Auto-DRS w VR ---
+    let frameCount = 0;
+    let lastTime = performance.now();
+    let currentFps = 60;
+
+    function fpsLoop() {
+      frameCount++;
+      const now = performance.now();
+      if (now - lastTime >= 1000) {
+        currentFps = Math.round((frameCount * 1000) / (now - lastTime));
+        frameCount = 0;
+        lastTime = now;
+
+        fpsDisplay.textContent = currentFps + ' FPS';
+
+        if (currentFps >= 50) {
+          fpsDisplay.className = "text-emerald-400 font-bold";
+          fpsDot.className = "w-3 h-3 rounded-full bg-emerald-400";
+        } else if (currentFps >= 35) {
+          fpsDisplay.className = "text-amber-400 font-bold";
+          fpsDot.className = "w-3 h-3 rounded-full bg-amber-400";
+        } else {
+          fpsDisplay.className = "text-rose-400 font-bold animate-pulse";
+          fpsDot.className = "w-3 h-3 rounded-full bg-rose-500";
+
+          // Auto-DRS w trybie VR: jeśli klatki spadną < 30 w goglach, korygujemy suwak
+          if (scene.is('vr-mode') && currentResolutionMultiplier > 0.7) {
+            const stepDown = Math.max(0.6, currentResolutionMultiplier - 0.1);
+            if (sliderResolution) sliderResolution.value = stepDown;
+            applyResolution(stepDown);
+          }
+        }
+      }
+      requestAnimationFrame(fpsLoop);
+    }
+    requestAnimationFrame(fpsLoop);
+
+    // Inicjalizacja Three.js po załadowaniu sceny
+    scene.addEventListener('loaded', () => {
+      applyResolution(1.0);
+
+      // Automatyczne wczytanie pin_model.glb, jeśli plik znajduje się w tym samym folderze na serwerze
+      fetch('pin_model.glb', { method: 'HEAD' })
+        .then((response) => {
+          if (response.ok) {
+            modelNameBadge.textContent = 'pin_model.glb';
+            proceduralPin.setAttribute('visible', 'false');
+            userModel.setAttribute('visible', 'true');
+            userModel.setAttribute('gltf-model', 'pin_model.glb');
+            isUserFileLoaded = true;
+          }
+        })
+        .catch(() => {
+          // W trybie lokalnym lub offline pozostaje aktywny model demonstracyjny
+        });
+    });
+
+    // --- Suwak gęstości / próbkowania porów (LOD) ---
+    sliderDensity.addEventListener('input', (e) => {
+      currentDensity = parseFloat(e.target.value);
+      poreDensityVal.textContent = Math.round(currentDensity * 100) + '%';
+
+      if (isUserFileLoaded) {
+        userModel.setAttribute('model-material-controller', 'poreRatio', currentDensity);
+      } else {
+        proceduralPin.setAttribute('procedural-preview-pin', 'density', currentDensity);
+      }
+    });
+
+    // Obsługa suwaka przezroczystości
+    sliderOpacity.addEventListener('input', (e) => {
+      currentPinOpacity = parseFloat(e.target.value);
+      opacityVal.textContent = Math.round(currentPinOpacity * 100) + '%';
+
+      if (isUserFileLoaded) {
+        if (!isXray) userModel.setAttribute('model-material-controller', 'pinOpacity', currentPinOpacity);
+      } else {
+        const proc = proceduralPin.components['procedural-preview-pin'];
+        if (proc) proc.updateOpacity(currentPinOpacity, isXray);
+      }
+    });
+
+    // Obsługa suwaka emisji porów
+    sliderGlow.addEventListener('input', (e) => {
+      currentGlow = parseFloat(e.target.value);
+      glowVal.textContent = currentGlow.toFixed(1) + 'x';
+
+      if (isUserFileLoaded) {
+        userModel.setAttribute('model-material-controller', 'poresGlow', currentGlow);
+      } else {
+        const proc = proceduralPin.components['procedural-preview-pin'];
+        if (proc) proc.updateGlow(currentGlow);
+      }
+    });
+
+    // Przełącznik Rentgen
+    btnXray.addEventListener('click', () => {
+      isXray = !isXray;
+      btnXray.classList.toggle('bg-sky-950', isXray);
+      btnXray.classList.toggle('border-sky-400', isXray);
+
+      if (isUserFileLoaded) {
+        userModel.setAttribute('model-material-controller', 'xrayMode', isXray);
+      } else {
+        const proc = proceduralPin.components['procedural-preview-pin'];
+        if (proc) proc.updateOpacity(currentPinOpacity, isXray);
+      }
+    });
+
+    // Przełącznik Wireframe
+    btnWireframe.addEventListener('click', () => {
+      isWireframe = !isWireframe;
+      btnWireframe.classList.toggle('bg-emerald-950', isWireframe);
+      btnWireframe.classList.toggle('border-emerald-400', isWireframe);
+
+      if (isUserFileLoaded) {
+        userModel.setAttribute('model-material-controller', 'pinWireframe', isWireframe);
+      } else {
+        const proc = proceduralPin.components['procedural-preview-pin'];
+        if (proc) proc.updateWireframe(isWireframe);
+      }
+    });
+
+    // Zatrzymanie / Wznowienie obrotu
+    toggleRotateBtn.addEventListener('click', () => {
+      isRotating = !isRotating;
+      modelPivot.setAttribute('auto-rotate', 'enabled', isRotating);
+      rotateBtnLabel.textContent = isRotating ? 'Pauza' : 'Obróć';
+    });
+
+    // Ładowanie pliku .GLB przez Blob URL
+    function loadGLBFile(file) {
+      if (!file) return;
+      try {
+        const objectURL = URL.createObjectURL(file);
+        modelNameBadge.textContent = file.name;
+
+        proceduralPin.setAttribute('visible', 'false');
+        userModel.setAttribute('visible', 'true');
+        userModel.removeAttribute('gltf-model');
+        userModel.setAttribute('gltf-model', objectURL);
+
+        isUserFileLoaded = true;
+      } catch (err) {
+        console.error('Błąd podczas ładowania pliku:', err);
+      }
+    }
+
+    glbFileInput.addEventListener('change', (e) => {
+      const file = e.target.files && e.target.files[0];
+      if (file) loadGLBFile(file);
+    });
+
+    // Obsługa Drag & Drop
+    window.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dropBanner.classList.remove('hidden');
+    });
+
+    window.addEventListener('dragleave', (e) => {
+      if (e.clientX === 0 || e.clientY === 0) {
+        dropBanner.classList.add('hidden');
+      }
+    });
+
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dropBanner.classList.add('hidden');
+      const files = e.dataTransfer.files;
+      if (files.length > 0 && (files[0].name.endsWith('.glb') || files[0].name.endsWith('.gltf'))) {
+        loadGLBFile(files[0]);
+      }
+    });
+  </script>
+</body>
+</html>
