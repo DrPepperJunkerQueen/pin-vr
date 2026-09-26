@@ -28,32 +28,34 @@ An interactive, browser-based **WebVR & 3D Tomography Inspection Tool** designed
 ```text
 ├── pin_model.glb      # Reconstructed 3D binary model (Pin body + micropore cloud)
 ├── webvr_app.html     # Single-file WebVR inspection application
-└── README.md          # Project documentation and manual
+└── README.md          # Project documentation and user guide
 ```
 
 ---
 
 ## 🛠️ Getting Started & Usage Guide 📖
 
-### 1. Launching via GitHub Pages (Recommended) 🌐
-Because mobile browsers enforce strict HTTPS security policies to grant access to device orientation (gyroscope) sensors:
-1. Enable **GitHub Pages** in your repository settings:
-   - Navigate to **Settings** ⚙️ $\rightarrow$ **Pages**.
-   - Under **Build and deployment**, select branch: `main` (or `master`) and folder: `/ (root)`.
-   - Click **Save**.
-2. Open the published link on your mobile browser (Safari, Chrome, or Firefox).
-3. If your main file is named `webvr_app.html`, visit:
-   ```url
-   https://<your-username>.github.io/<your-repo-name>/webvr_app.html
-   ```
+### 1. Launch the Live WebVR App (Recommended) 🌐
+No installation, setup, or builds required! The application is hosted directly via GitHub Pages over a secure **HTTPS** connection (mandatory for mobile browsers to access gyroscope and orientation sensors):
 
-### 2. Local Testing (Desktop / Local Network) 💻
-You can spin up a local development server with Live Server or Python:
+👉 **[Launch 3D CT Pin Inspector](https://drpepperjunkerqueen.github.io/pin-vr/webvr_app.html)**  
+
+1. Open the link above in your mobile web browser (**Chrome**, **Safari**, or **Firefox**).
+2. The 3D model loads and centers automatically on the inspection stage.
+
+---
+
+### 2. Local Testing (Optional for Developers) 💻
+If you want to clone this repository and run it locally on your computer:
 ```bash
-# Using Python 3
+# Clone the repository
+git clone https://github.com/drpepperjunkerqueen/pin-vr.git
+cd pin-vr
+
+# Start a quick local web server using Python 3
 python -m http.server 8000
 ```
-Open `http://localhost:8000/webvr_app.html` in your browser.
+Then navigate to `http://localhost:8000/webvr_app.html` in your browser.
 
 ---
 
