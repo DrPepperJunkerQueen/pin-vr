@@ -113,8 +113,7 @@
               this.poreMeshes.push(node);
               const geom = node.geometry;
 
-              // Przygotowanie losowo przetasowanego bufora trójkątów,
-              // aby redukcja drawRange próbkowała pory w całej objętości pinu
+              // Deterministyczne przetasowanie bufora trójkątów dla równomiernego LOD
               if (geom.index) {
                 const count = geom.index.count;
                 const triangleCount = Math.floor(count / 3);
@@ -124,7 +123,6 @@
                 const triIndices = new Uint32Array(triangleCount);
                 for (let i = 0; i < triangleCount; i++) triIndices[i] = i;
 
-                // Deterministyczne tasowanie LCG
                 let seed = 54321;
                 for (let i = triangleCount - 1; i > 0; i--) {
                   seed = (seed * 1664525 + 1013904223) % 4294967296;
@@ -156,7 +154,7 @@
         const ratio = Math.max(0.15, this.data.poreRatio);
 
         this.poreMeshes.forEach((node) => {
-          node.visible = true; // Nigdy nie ukrywamy całego obiektu
+          node.visible = true;
           const geom = node.geometry;
           if (geom && geom.userData.totalTriangles) {
             const triCount = geom.userData.totalTriangles;
@@ -169,7 +167,6 @@
         const mesh = this.el.getObject3D('mesh');
         if (!mesh) return;
 
-        // Auto-kompensacja blasku: przy niższej gęstości pory świecą mocniej, by pozostać dobrze widoczne
         const effectiveGlow = this.data.poresGlow * (1 + (1 - this.data.poreRatio) * 0.75);
 
         mesh.traverse((node) => {
@@ -263,7 +260,6 @@
       },
       update: function () {
         if (this.instancedPores) {
-          // Gwarantujemy, że zawsze widoczna jest czytelna reprezentacja porów
           const minCount = 120;
           this.instancedPores.count = Math.max(minCount, Math.floor(this.maxPores * Math.max(0.2, this.data.density)));
           this.instancedPores.instanceMatrix.needsUpdate = true;
@@ -307,23 +303,29 @@
       <a-cylinder radius="1.3" height="0.08" color="#0f172a" position="0 0.04 0" material="roughness: 0.4; metalness: 0.7"></a-cylinder>
       <a-torus radius="1.32" radius-tubular="0.015" rotation="90 0 0" position="0 0.08 0" color="#38bdf8" material="emissive: #38bdf8; emissiveIntensity: 0.8"></a-torus>
       <a-ring radius-inner="1.55" radius-outer="1.58" rotation="-90 0 0" position="0 0.02 0" color="#0ea5e9" opacity="0.4" class="pulse-effect"></a-ring>
+      
+      <!-- Ścieżka orbitalna pinu widoczna po przełączeniu do środka okręgu -->
+      <a-ring id="orbitGuideRing" radius-inner="2.18" radius-outer="2.22" rotation="-90 0 0" position="0 0.02 0" color="#38bdf8" opacity="0.4" visible="false"></a-ring>
     </a-entity>
 
     <!-- Pivot obrotu modelu tomograficznego -->
     <a-entity id="modelPivot" position="0 0.2 0" auto-rotate="speed: 0.35; enabled: true">
-      <!-- Obiekt proceduralny -->
-      <a-entity id="proceduralPin" procedural-preview-pin="density: 1.0" position="0 0 0"></a-entity>
+      <!-- Kontener z możliwością dynamicznego odsunięcia na promień orbity -->
+      <a-entity id="modelContainer" position="0 0 0">
+        <!-- Obiekt proceduralny -->
+        <a-entity id="proceduralPin" procedural-preview-pin="density: 1.0" position="0 0 0"></a-entity>
 
-      <!-- Obiekt wczytany przez użytkownika z pliku GLB -->
-      <a-entity 
-        id="userModel" 
-        visible="false"
-        model-material-controller="pinOpacity: 0.32; pinWireframe: false; poresGlow: 2.5; xrayMode: false; poreRatio: 1.0"
-        position="0 0 0">
+        <!-- Obiekt wczytany przez użytkownika z pliku GLB -->
+        <a-entity 
+          id="userModel" 
+          visible="false"
+          model-material-controller="pinOpacity: 0.32; pinWireframe: false; poresGlow: 2.5; xrayMode: false; poreRatio: 1.0"
+          position="0 0 0">
+        </a-entity>
       </a-entity>
     </a-entity>
 
-    <!-- Kamera VR -->
+    <!-- Kamera VR (A-Frame automatycznie dodaje ~1.6m wysokości oczu w goglach VR z żyroskopem) -->
     <a-entity id="rig" position="0 1.5 2.6">
       <a-camera 
         id="camera" 
@@ -350,7 +352,7 @@
           <div class="flex items-center gap-2 bg-slate-900/90 px-2.5 py-1 rounded-lg border border-slate-700/60 font-mono text-xs">
             <span id="fpsDisplay" class="text-emerald-400 font-bold">60 FPS</span>
             <span class="text-slate-500">|</span>
-            <span id="scaleDisplay" class="text-sky-300">1.0x</span>
+            <span id="scaleDisplay" class="text-sky-300">1.00x</span>
           </div>
         </div>
 
@@ -362,7 +364,7 @@
 
       <!-- Pasek profilu skalowania i importu -->
       <div class="flex items-center gap-2">
-        <!-- Suwak Ostrości / Rozdzielczości bufora (Sharpness) -->
+        <!-- Suwak Ostrości / Rozdzielczości bufora (0.01x - 2.00x) -->
         <div class="glass-panel rounded-2xl px-3 py-2 pointer-events-auto flex items-center gap-2.5 shadow-lg text-xs">
           <div class="flex flex-col gap-1">
             <div class="flex justify-between items-center gap-3 text-[10px] text-slate-300 font-medium">
@@ -433,6 +435,22 @@
           </button>
         </div>
 
+        <!-- Przycisk przełączania widoku: Środek orbity (Pin na wysokości oczu krąży wokół Ciebie) -->
+        <button id="btnOrbitView" class="mt-2 w-full bg-slate-800/80 hover:bg-slate-700 border border-slate-600/80 rounded-xl p-2 flex items-center justify-between transition text-left">
+          <div class="flex items-center gap-2">
+            <svg class="w-4 h-4 text-sky-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <circle cx="12" cy="12" r="10"/>
+              <circle cx="12" cy="12" r="3"/>
+              <path d="M12 2a10 10 0 0 1 10 10"/>
+            </svg>
+            <div>
+              <div class="font-bold text-slate-200 text-xs">Pozycja: Środek okręgu</div>
+              <div id="orbitViewStatus" class="text-[10px] text-slate-400">Obserwujesz z zewnątrz</div>
+            </div>
+          </div>
+          <span id="orbitViewBadge" class="text-[10px] bg-sky-500/20 text-sky-300 px-2 py-1 rounded-lg border border-sky-500/30 font-medium">Wejdź do środka</span>
+        </button>
+
         <!-- Suwak gęstości porów (Kluczowy dla FPS w telefonie) -->
         <div class="mt-2.5 bg-slate-900/60 p-2 rounded-xl border border-slate-800">
           <div class="flex justify-between text-[11px] text-slate-300 mb-1">
@@ -488,9 +506,12 @@
     const userModel = document.getElementById('userModel');
     const proceduralPin = document.getElementById('proceduralPin');
     const modelPivot = document.getElementById('modelPivot');
+    const modelContainer = document.getElementById('modelContainer');
+    const orbitGuideRing = document.getElementById('orbitGuideRing');
     const glbFileInput = document.getElementById('glbFileInput');
     const modelNameBadge = document.getElementById('modelNameBadge');
     const dropBanner = document.getElementById('dropBanner');
+    const rig = document.getElementById('rig');
 
     const sliderOpacity = document.getElementById('sliderOpacity');
     const opacityVal = document.getElementById('opacityVal');
@@ -507,6 +528,9 @@
 
     const btnXray = document.getElementById('btnXray');
     const btnWireframe = document.getElementById('btnWireframe');
+    const btnOrbitView = document.getElementById('btnOrbitView');
+    const orbitViewStatus = document.getElementById('orbitViewStatus');
+    const orbitViewBadge = document.getElementById('orbitViewBadge');
     const toggleRotateBtn = document.getElementById('toggleRotateBtn');
     const rotateBtnLabel = document.getElementById('rotateBtnLabel');
 
@@ -517,8 +541,9 @@
     let isXray = false;
     let isRotating = true;
     let isUserFileLoaded = false;
+    let isCenterOrbitMode = false;
 
-    // --- Skalowanie Jakości (Płynny Suwak Pixel Ratio) ---
+    // --- Skalowanie Jakości (Płynny Suwak Pixel Ratio 0.01x - 2.00x) ---
     let currentResolutionMultiplier = 1.0;
 
     function applyResolution(multiplier) {
@@ -531,7 +556,6 @@
       
       renderer.setPixelRatio(computedRatio);
       
-      // Bezpieczna aktualizacja etykiet w UI
       if (sliderResBadge) {
         sliderResBadge.textContent = multiplier.toFixed(2) + 'x';
         if (multiplier < 0.6) {
@@ -555,7 +579,35 @@
       });
     }
 
-    // --- Monitor klatek na sekundę (FPS) & Opcjonalne Auto-DRS w VR ---
+    // --- Przełącznik Punktu Widzenia: Środek okręgu (Pin krąży na wysokości oczu) ---
+    btnOrbitView.addEventListener('click', () => {
+      isCenterOrbitMode = !isCenterOrbitMode;
+
+      if (isCenterOrbitMode) {
+        // W goglach VR przeglądarka dodaje domyślną wysokość oczu (~1.6m),
+        // dlatego rig ustawiamy na 0, a środek pinu umieszczamy na 1.0m - dokładnie przed oczami.
+        rig.setAttribute('position', '0 0 0');
+        modelContainer.setAttribute('position', '0 1.0 -2.2');
+        if (orbitGuideRing) orbitGuideRing.setAttribute('visible', 'true');
+
+        orbitViewStatus.textContent = 'Środek (Pin na wysokości oczu)';
+        orbitViewBadge.textContent = 'Wróć na zewnątrz';
+        orbitViewBadge.className = "text-[10px] bg-emerald-500/20 text-emerald-300 px-2 py-1 rounded-lg border border-emerald-500/40 font-medium";
+        btnOrbitView.classList.add('bg-sky-950/90', 'border-sky-400');
+      } else {
+        // Powrót do standardowego widoku laboratoryjnego z zewnątrz
+        rig.setAttribute('position', '0 1.5 2.6');
+        modelContainer.setAttribute('position', '0 0 0');
+        if (orbitGuideRing) orbitGuideRing.setAttribute('visible', 'false');
+
+        orbitViewStatus.textContent = 'Obserwujesz z zewnątrz';
+        orbitViewBadge.textContent = 'Wejdź do środka';
+        orbitViewBadge.className = "text-[10px] bg-sky-500/20 text-sky-300 px-2 py-1 rounded-lg border border-sky-500/30 font-medium";
+        btnOrbitView.classList.remove('bg-sky-950/90', 'border-sky-400');
+      }
+    });
+
+    // --- Monitor klatek na sekundę (FPS) & Auto-DRS w VR ---
     let frameCount = 0;
     let lastTime = performance.now();
     let currentFps = 60;
@@ -580,7 +632,6 @@
           fpsDisplay.className = "text-rose-400 font-bold animate-pulse";
           fpsDot.className = "w-3 h-3 rounded-full bg-rose-500";
 
-          // Auto-DRS w trybie VR: jeśli klatki spadną < 30 w goglach, korygujemy suwak
           if (scene.is('vr-mode') && currentResolutionMultiplier > 0.7) {
             const stepDown = Math.max(0.6, currentResolutionMultiplier - 0.1);
             if (sliderResolution) sliderResolution.value = stepDown;
@@ -596,7 +647,7 @@
     scene.addEventListener('loaded', () => {
       applyResolution(1.0);
 
-      // Automatyczne wczytanie pin_model.glb, jeśli plik znajduje się w tym samym folderze na serwerze
+      // Automatyczne wczytanie pin_model.glb z katalogu aplikacji
       fetch('pin_model.glb', { method: 'HEAD' })
         .then((response) => {
           if (response.ok) {
@@ -607,12 +658,10 @@
             isUserFileLoaded = true;
           }
         })
-        .catch(() => {
-          // W trybie lokalnym lub offline pozostaje aktywny model demonstracyjny
-        });
+        .catch(() => {});
     });
 
-    // --- Suwak gęstości / próbkowania porów (LOD) ---
+    // Suwak gęstości próbkowania porów (LOD)
     sliderDensity.addEventListener('input', (e) => {
       currentDensity = parseFloat(e.target.value);
       poreDensityVal.textContent = Math.round(currentDensity * 100) + '%';
@@ -624,7 +673,7 @@
       }
     });
 
-    // Obsługa suwaka przezroczystości
+    // Suwak przezroczystości metalu
     sliderOpacity.addEventListener('input', (e) => {
       currentPinOpacity = parseFloat(e.target.value);
       opacityVal.textContent = Math.round(currentPinOpacity * 100) + '%';
@@ -637,7 +686,7 @@
       }
     });
 
-    // Obsługa suwaka emisji porów
+    // Suwak emisji porów
     sliderGlow.addEventListener('input', (e) => {
       currentGlow = parseFloat(e.target.value);
       glowVal.textContent = currentGlow.toFixed(1) + 'x';
