@@ -1,32 +1,32 @@
 # 🔬 CT Voxel VR: 3D Micro-CT Pin & Defect Inspector 🥽
 
-An interactive, browser-based **WebVR & 3D Tomography Inspection Tool** designed for non-destructive testing (NDT) analysis[cite: 7]. This application renders real reconstructed computed tomography (CT) datasets of an engineered pin, allowing users to inspect internal porosity and structural defects in immersive Virtual Reality directly through a smartphone or desktop web browser[cite: 7].
+An interactive, browser-based **WebVR & 3D Tomography Inspection Tool** designed for non-destructive testing (NDT) analysis. This application renders real reconstructed computed tomography (CT) datasets of an engineered pin, allowing users to inspect internal porosity and structural defects in immersive Virtual Reality directly through a smartphone or desktop web browser.
 
 ## 📸 Key Features 🚀
 
-* 🕶️ **Full WebVR & Mobile Headset Support:** Built with A-Frame & Three.js[cite: 7]. Compatible with Google Cardboard, VR Box, and mobile stereoscopic headsets with zero installation needed[cite: 7].
+* 🕶️ **Full WebVR & Mobile Headset Support:** Built with A-Frame & Three.js. Compatible with Google Cardboard, VR Box, and mobile stereoscopic headsets with zero installation needed.
 
-* 🔍 **Real Tomography Data Integration:** Visualizes dual-mesh volumetric segmentations: the semi-transparent outer metal pin shell and internal high-contrast defect micropores (`pin_model.glb`)[cite: 7].
+* 🔍 **Real Tomography Data Integration:** Visualizes dual-mesh volumetric segmentations: the semi-transparent outer metal pin shell and internal high-contrast defect micropores (`pin_model.glb`).
 
 * 🔄 **Dual Inspection Perspectives & 360° Circular Translation:**
-  * **Standard Lab View:** Inspect the rotating pin from an exterior vantage point on an illuminated laboratory pedestal[cite: 7].
-  * **Center Stage / Orbit Mode ($R = 5\,\text{m}$):** Step directly into the center of the inspection circle[cite: 7]. The pin is calibrated right at **eye level** and travels along an expanded circular path with **fixed spatial orientation** (translational movement without local self-rotation). This enables the viewer in the center to examine all $360^\circ$ angles of the pin simply by turning their head.
+  * **Standard Lab View:** Inspect the rotating pin from an exterior vantage point on an illuminated laboratory pedestal.
+  * **Center Stage / Orbit Mode ($R = 5\,\text{m}$):** Step directly into the center of the inspection circle. The pin is calibrated right at **eye level** and travels along an expanded circular path with **fixed spatial orientation** (translational movement without local self-rotation). This enables the viewer in the center to examine all $360^\circ$ angles of the pin simply by turning their head.
 
-* ⚡ **Dynamic Sharpness & Buffer Scaling:** An ultra-flexible resolution slider ranging from **0.01x to 2.00x**, allowing smooth 60+ FPS playback on mobile GPUs[cite: 7].
+* ⚡ **Dynamic Sharpness & Buffer Scaling:** An ultra-flexible resolution slider ranging from **0.01x to 2.00x**, allowing smooth 60+ FPS playback on mobile GPUs.
 
 * 🎛️ **Variable Orbit Speed Controller:** Smooth speed slider scaling from **0.2x to 5.0x** (with a balanced default at 1.0x), enabling everything from slow, meticulous flaw inspection to quick overviews.
 
-* 🎯 **Pore Cloud Decimation / Level of Detail (LOD):** Real-time triangle buffer sampling (5%–100%) with automatic glow compensation so defects remain sharp and visible without lagging mobile devices[cite: 7].
+* 🎯 **Pore Cloud Decimation / Level of Detail (LOD):** Real-time triangle buffer sampling (5%–100%) with automatic glow compensation so defects remain sharp and visible without lagging mobile devices.
 
 * 🩻 **Inspection Tools:**
   * **Orbit View Switch:** Toggle between exterior pedestal inspection and center-stage circular trajectory.
   * **Speed Slider:** Control the translation and rotation speed in real-time.
-  * **X-Ray Mode:** Strips surface reflections and increases opacity transparency to emphasize deep-seated porosity clusters[cite: 7].
-  * **Wireframe Mode:** Inspect underlying polygonal density and surface topology[cite: 7].
-  * **Live Opacity & Emission Tuners:** Adjust outer metal transparency and micropore glow intensity on the fly[cite: 7].
+  * **X-Ray Mode:** Strips surface reflections and increases opacity transparency to emphasize deep-seated porosity clusters.
+  * **Wireframe Mode:** Inspect underlying polygonal density and surface topology.
+  * **Live Opacity & Emission Tuners:** Adjust outer metal transparency and micropore glow intensity on the fly.
   * **Motion Toggle:** Pause/resume translation and orbital sweep at any position.
 
-* 📊 **Real-time Performance Monitor:** Displays a live FPS counter, dynamic render resolution, and active inspection status[cite: 7].
+* 📊 **Real-time Performance Monitor:** Displays a live FPS counter, dynamic render resolution, and active inspection status.
 
 ## 📂 Repository Structure 📁
 
@@ -38,22 +38,22 @@ An interactive, browser-based **WebVR & 3D Tomography Inspection Tool** designed
 └── README.md          # Project documentation and user guide
 
 ```
-[cite: 7]
+
 
 ## 🛠️ Getting Started & Usage Guide 📖
 
 ### 1. Launch the Live WebVR App (Recommended) 🌐
 
-No installation, setup, or builds required![cite: 7] The application is hosted directly via GitHub Pages over a secure **HTTPS** connection (mandatory for mobile browsers to access gyroscope and orientation sensors)[cite: 7]:
+No installation, setup, or builds required! The application is hosted directly via GitHub Pages over a secure **HTTPS** connection (mandatory for mobile browsers to access gyroscope and orientation sensors):
 
-👉 [**Launch 3D CT Pin Inspector**](https://drpepperjunkerqueen.github.io/pin-vr/webvr_app.html)[cite: 7]
+👉 [**Launch 3D CT Pin Inspector**](https://drpepperjunkerqueen.github.io/pin-vr/webvr_app.html)
 
-1. Open the link above in your mobile web browser (**Chrome**, **Safari**, or **Firefox**)[cite: 7].
-2. The 3D model loads and calibrates automatically at eye level on the stage[cite: 7].
+1. Open the link above in your mobile web browser (**Chrome**, **Safari**, or **Firefox**).
+2. The 3D model loads and calibrates automatically at eye level on the stage.
 
 ### 2. Local Testing (Optional for Developers) 💻
 
-If you want to clone this repository and run it locally on your computer[cite: 7]:
+If you want to clone this repository and run it locally on your computer:
 
 ```bash
 # Clone the repository
