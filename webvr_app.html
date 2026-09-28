@@ -362,24 +362,28 @@
     }
     requestAnimationFrame(onAnimationTick);
 
-    // Rejestracja geometrii, wycentrowanie środka pinu w osiach X i Z (Obrazek B)
-    // oraz zapamiętanie oryginalnych indeksów trójkątów do próbkowania
+    // Rejestracja geometrii, stabilne wycentrowanie środka pinu
+    // oraz zapamiętanie oryginalnych indeksów trójkątów
     function registerModelMeshes(root3D) {
       state.modelNodes.body = [];
       state.modelNodes.pores = [];
 
-      // 1. Obliczenie geometrycznego środka pinu i wycentrowanie go w płaszczyźnie poziomej (X, Z)
+      // 1. WYMUSZENIE AKTUALIZACJI MACIERZY ŚWIATA (kluczowe dla GitHub Pages)
+      root3D.updateMatrixWorld(true);
+
+      // Obliczamy lokalny bounding box samego wczytanego modelu GLTF
       const box = new THREE.Box3().setFromObject(root3D);
       const center = new THREE.Vector3();
       box.getCenter(center);
 
-      const scalerEl = document.getElementById('modelScaler');
-      if (scalerEl && scalerEl.object3D) {
-        scalerEl.object3D.worldToLocal(center);
-        // Przesuwamy model o wektor środka w X i Z (Y zostawiamy bez zmian dla zachowania wysokości)
-        loadedModel.object3D.position.x -= center.x;
-        loadedModel.object3D.position.z -= center.z;
-      }
+      // Resetujemy przesunięcie i centrujemy pin dokładnie w osiach X i Z
+      // (Dzięki temu odległość do oczu jest stała jak na rysunku B)
+      const currentPos = loadedModel.getAttribute('position') || { x: 0, y: 0, z: 0 };
+      loadedModel.setAttribute('position', {
+        x: -center.x,
+        y: currentPos.y, // wysokość Y pozostaje nienaruszona
+        z: -center.z
+      });
 
       // 2. Kategoryzacja siatek pinu i porów
       root3D.traverse((child) => {
@@ -418,11 +422,14 @@
     }
 
     loadedModel.addEventListener('model-loaded', () => {
-      const mesh = loadedModel.getObject3D('mesh');
-      if (mesh) {
-        registerModelMeshes(mesh);
-        notify("Wczytano i wycentrowano model na orbicie!");
-      }
+      // Dajemy jedną klatkę na ułożenie sceny przez silnik A-Frame
+      requestAnimationFrame(() => {
+        const mesh = loadedModel.getObject3D('mesh');
+        if (mesh) {
+          registerModelMeshes(mesh);
+          notify("Wczytano i wycentrowano model na orbicie!");
+        }
+      });
     });
 
     function applyAlpha() {
