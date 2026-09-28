@@ -183,7 +183,7 @@
       </div>
     </div>
 
-    <!-- Suwak ostrości / Pixel Ratio -->
+    <!-- Suwak ostrości -->
     <div class="badge-card" style="gap: 12px;">
       <span style="font-size: 12px; color: var(--text-dim);">Ostrość:</span>
       <input type="range" id="sliderResolution" class="slider-input" min="0.01" max="2.00" step="0.01" value="1.00" style="width: 100px;">
@@ -246,7 +246,7 @@
         <span>Szybkość obrotu:</span>
         <span id="labelSpeed">1.0x</span>
       </div>
-      <input type="range" id="sliderSpeed" class="slider-input" min="0.2" max="5.0" step="0.2" value="1.0">
+      <input type="range" id="sliderSpeed" class="slider-input" min="0.2" max="5.0" step="0.1" value="1.0">
     </div>
 
     <div class="slider-row">
@@ -280,9 +280,17 @@
       <a-camera id="mainCamera" look-controls="pointerLockEnabled: false" wasd-controls="acceleration: 20"></a-camera>
     </a-entity>
 
-    <!-- Kontener poruszający się po okręgu na wybranej wysokości Y = 3.1m -->
-    <a-entity id="modelContainer" position="0 3.1 -10.0">
-      <a-entity id="modelScaler" scale="0.08 0.08 0.08" position="0 0 0">
+    <!-- 
+      KONTENER PINU:
+      1. Porusza się na stałej wysokości wzroku Y = 1.6m
+      2. Wewnątrz 'modelScaler' przesuwamy model o sztywne, zmierzone współrzędne środka:
+         X = -9.78 * 0.08 = -0.78m
+         Y = -50.2 * 0.08 = -4.01m (centruje pin w pionie)
+         Z = +9.85 * 0.08 = +0.79m
+      Dzięki temu pin leży idealnie na osi toru B, bez względu na opóźnienia sieciowe!
+    -->
+    <a-entity id="modelContainer" position="0 1.6 -10.0">
+      <a-entity id="modelScaler" scale="0.08 0.08 0.08" position="-0.78 -4.01 0.79">
         <a-entity id="loadedModel" gltf-model="pin_model.glb"></a-entity>
       </a-entity>
 
@@ -333,16 +341,15 @@
         notify("Tryb: Środek okręgu (Okrąg R=10m)");
       } else {
         if (btn) btn.classList.remove('active');
-        cameraRig.setAttribute('position', '0 2.0 12.0');
+        cameraRig.setAttribute('position', '0 2.0 14.0');
         if (orbitGuideRing) orbitGuideRing.setAttribute('visible', 'false');
-        modelContainer.setAttribute('position', '0 3.1 0');
+        modelContainer.setAttribute('position', '0 1.6 0');
         modelContainer.setAttribute('rotation', '0 0 0');
         notify("Tryb: Widok z zewnątrz");
       }
     }
 
-    // Pętla animacji ruchu postępowego:
-    // Pin porusza się po okręgu, będąc wycentrowanym dokładnie na linii toru (obrazek B)
+    // Pętla animacji ruchu postępowego po okręgu
     function onAnimationTick() {
       requestAnimationFrame(onAnimationTick);
       if (!state.isAnimating) return;
@@ -353,7 +360,7 @@
         const x = Math.sin(state.orbitAngle) * state.orbitRadius;
         const z = Math.cos(state.orbitAngle) * state.orbitRadius;
 
-        modelContainer.setAttribute('position', `${x} 3.1 ${z}`);
+        modelContainer.setAttribute('position', `${x} 1.6 ${z}`);
         modelContainer.setAttribute('rotation', '0 0 0');
       } else {
         const currentRot = modelContainer.getAttribute('rotation') || { x: 0, y: 0, z: 0 };
@@ -362,30 +369,11 @@
     }
     requestAnimationFrame(onAnimationTick);
 
-    // Rejestracja geometrii, stabilne wycentrowanie środka pinu
-    // oraz zapamiętanie oryginalnych indeksów trójkątów
+    // Kategoryzacja siatek pinu i porów z buforem do próbkowania
     function registerModelMeshes(root3D) {
       state.modelNodes.body = [];
       state.modelNodes.pores = [];
 
-      // 1. WYMUSZENIE AKTUALIZACJI MACIERZY ŚWIATA (kluczowe dla GitHub Pages)
-      root3D.updateMatrixWorld(true);
-
-      // Obliczamy lokalny bounding box samego wczytanego modelu GLTF
-      const box = new THREE.Box3().setFromObject(root3D);
-      const center = new THREE.Vector3();
-      box.getCenter(center);
-
-      // Resetujemy przesunięcie i centrujemy pin dokładnie w osiach X i Z
-      // (Dzięki temu odległość do oczu jest stała jak na rysunku B)
-      const currentPos = loadedModel.getAttribute('position') || { x: 0, y: 0, z: 0 };
-      loadedModel.setAttribute('position', {
-        x: -center.x,
-        y: currentPos.y, // wysokość Y pozostaje nienaruszona
-        z: -center.z
-      });
-
-      // 2. Kategoryzacja siatek pinu i porów
       root3D.traverse((child) => {
         if (child.isMesh) {
           const name = (child.name || '').toLowerCase();
@@ -422,14 +410,11 @@
     }
 
     loadedModel.addEventListener('model-loaded', () => {
-      // Dajemy jedną klatkę na ułożenie sceny przez silnik A-Frame
-      requestAnimationFrame(() => {
-        const mesh = loadedModel.getObject3D('mesh');
-        if (mesh) {
-          registerModelMeshes(mesh);
-          notify("Wczytano i wycentrowano model na orbicie!");
-        }
-      });
+      const mesh = loadedModel.getObject3D('mesh');
+      if (mesh) {
+        registerModelMeshes(mesh);
+        notify("Wczytano model tomografii GLB!");
+      }
     });
 
     function applyAlpha() {
@@ -442,7 +427,7 @@
       });
     }
 
-    // Równomierne próbkowanie gęstości w całej objętości (bez ucinania pinu od góry)
+    // Równomierne próbkowanie w całej objętości (nie skraca pinu)
     function applyDensity() {
       const ratio = state.density / 100.0;
 
@@ -472,15 +457,6 @@
         }
         geom.index.needsUpdate = true;
       });
-
-      const demoGroup = document.getElementById('demoPoresGroup');
-      if (demoGroup) {
-        const children = demoGroup.children;
-        const visibleCount = Math.max(1, Math.ceil(children.length * ratio));
-        for (let i = 0; i < children.length; i++) {
-          children[i].setAttribute('visible', i < visibleCount ? 'true' : 'false');
-        }
-      }
     }
 
     function applyWireframe() {
@@ -560,7 +536,7 @@
       if (!file) return;
       const url = URL.createObjectURL(file);
       loadedModel.setAttribute('gltf-model', url);
-      notify("Wczytywanie: " + file.name);
+      notify("Ładowanie: " + file.name);
     });
 
     // Licznik FPS
@@ -571,7 +547,7 @@
       if (now - lastTime >= 1000) {
         const fps = Math.round((frames * 1000) / (now - lastTime));
         const metric = document.getElementById('fpsMetric');
-        if (metric) metric.innerText = `FPS: ${fps} | Promień: 10m`;
+        if (metric) metric.innerText = `FPS: ${fps} | R = 10m`;
         frames = 0;
         lastTime = now;
       }
