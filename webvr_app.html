@@ -179,7 +179,7 @@
       <div class="status-dot" id="statusDot"></div>
       <div>
         <div style="font-weight: 700; font-size: 13px; letter-spacing: 0.5px;">TOMOGRAFIA PINU VR</div>
-        <div style="font-size: 11px; color: var(--text-dim);" id="fpsMetric">FPS: -- | Tor: Zewnętrzny</div>
+        <div style="font-size: 11px; color: var(--text-dim);" id="fpsMetric">FPS: -- | Promień: 10m</div>
       </div>
     </div>
 
@@ -246,7 +246,7 @@
         <span>Szybkość obrotu:</span>
         <span id="labelSpeed">1.0x</span>
       </div>
-      <input type="range" id="sliderSpeed" class="slider-input" min="0.2" max="5.0" step="0.1" value="1.0">
+      <input type="range" id="sliderSpeed" class="slider-input" min="0.2" max="5.0" step="0.2" value="1.0">
     </div>
 
     <div class="slider-row">
@@ -272,28 +272,23 @@
     <a-entity light="type: directional; color: #ffffff; intensity: 1.5; position: 3 6 4;"></a-entity>
     <a-entity light="type: point; color: #38bdf8; intensity: 1.8; distance: 15; position: -2 2 -1;"></a-entity>
 
-    <!-- Niebieski ring toru na podłodze: R = 6.0 m -->
-    <a-ring id="orbitGuideRing" radius-inner="5.96" radius-outer="6.04" rotation="-90 0 0" position="0 0.02 0" color="#38bdf8" opacity="0.5" visible="true"></a-ring>
+    <!-- Ring na podłodze o promieniu 10 metrów -->
+    <a-ring id="orbitGuideRing" radius-inner="9.96" radius-outer="10.04" rotation="-90 0 0" position="0 0.02 0" color="#38bdf8" opacity="0.45" visible="true"></a-ring>
 
-    <!-- Kamera widza w centrum na naturalnej wysokości oczu (Y = 1.6m) -->
+    <!-- Kamera w centrum na wysokości wzroku -->
     <a-entity id="cameraRig" position="0 1.6 0">
       <a-camera id="mainCamera" look-controls="pointerLockEnabled: false" wasd-controls="acceleration: 20"></a-camera>
     </a-entity>
 
-    <!-- 
-      Kontener pinu:
-      - Porusza się na wysokości wzroku Y = 1.6 m
-      - Model wewnątrz jest wycentrowany w swojej osi pionowej (Y = -50 * 0.04 = -2.0m)
-      - Dzięki temu pin krąży NA ZEWNĄTRZ okręgu, nie wchodząc do wnętrza strefy widza
-    -->
-    <a-entity id="modelContainer" position="0 1.6 -6.0">
-      <a-entity id="modelScaler" scale="0.04 0.04 0.04" position="0 -2.0 0">
+    <!-- Kontener poruszający się po okręgu na wybranej wysokości Y = 3.1m -->
+    <a-entity id="modelContainer" position="0 3.1 -10.0">
+      <a-entity id="modelScaler" scale="0.08 0.08 0.08" position="0 0 0">
         <a-entity id="loadedModel" gltf-model="pin_model.glb"></a-entity>
       </a-entity>
 
       <!-- Awaryjny model proceduralny -->
       <a-entity id="fallbackDemoPin" visible="false">
-        <a-cylinder id="demoPinBody" height="4.0" radius="0.4" position="0 0 0" material="color: #64748b; transparent: true; opacity: 0.25;"></a-cylinder>
+        <a-cylinder id="demoPinBody" height="2.0" radius="0.32" position="0 0 0" material="color: #64748b; transparent: true; opacity: 0.25;"></a-cylinder>
       </a-entity>
     </a-entity>
   </a-scene>
@@ -306,11 +301,10 @@
       isWireframe: false,
       alpha: 0.25,
       density: 100,
-      orbitRadius: 6.0,          // Promień 6 metrów (pin bezpiecznie poza środkiem)
+      orbitRadius: 10.0,
       orbitAngle: 0,
-      baseSpeed: 0.008,          // Umiarkowana, czytelna prędkość ruchu
+      baseSpeed: 0.012,
       speedMultiplier: 1.0,
-      eyeHeight: 1.6,            // Precyzyjny poziom oczu widza
       modelNodes: { body: [], pores: [] }
     };
 
@@ -334,22 +328,21 @@
       const btn = document.getElementById('btnToggleOrbitView');
       if (state.isOrbitView) {
         if (btn) btn.classList.add('active');
-        cameraRig.setAttribute('position', `0 ${state.eyeHeight} 0`);
+        cameraRig.setAttribute('position', '0 1.6 0');
         if (orbitGuideRing) orbitGuideRing.setAttribute('visible', 'true');
-        notify("Tryb: Środek okręgu (Pin na zewnątrz toru)");
+        notify("Tryb: Środek okręgu (Okrąg R=10m)");
       } else {
         if (btn) btn.classList.remove('active');
-        cameraRig.setAttribute('position', `0 ${state.eyeHeight} 7.5`);
+        cameraRig.setAttribute('position', '0 2.0 12.0');
         if (orbitGuideRing) orbitGuideRing.setAttribute('visible', 'false');
-        modelContainer.setAttribute('position', `0 ${state.eyeHeight} 0`);
+        modelContainer.setAttribute('position', '0 3.1 0');
         modelContainer.setAttribute('rotation', '0 0 0');
         notify("Tryb: Widok z zewnątrz");
       }
     }
 
     // Pętla animacji ruchu postępowego:
-    // Pin przemieszcza się po okręgu, zachowując STAŁY KĄT ŚWIATA (0, 0, 0),
-    // więc widz w środku obraca głowę i widzi każdą stronę pinu z zewnątrz okręgu.
+    // Pin porusza się po okręgu, będąc wycentrowanym dokładnie na linii toru (obrazek B)
     function onAnimationTick() {
       requestAnimationFrame(onAnimationTick);
       if (!state.isAnimating) return;
@@ -360,10 +353,7 @@
         const x = Math.sin(state.orbitAngle) * state.orbitRadius;
         const z = Math.cos(state.orbitAngle) * state.orbitRadius;
 
-        // Pin porusza się ściśle na wysokości oczu (Y = 1.6m) po zewnętrznym torze R = 6.0m
-        modelContainer.setAttribute('position', `${x} ${state.eyeHeight} ${z}`);
-
-        // Stała orientacja w przestrzeni (zgodnie ze szkicem)
+        modelContainer.setAttribute('position', `${x} 3.1 ${z}`);
         modelContainer.setAttribute('rotation', '0 0 0');
       } else {
         const currentRot = modelContainer.getAttribute('rotation') || { x: 0, y: 0, z: 0 };
@@ -372,18 +362,39 @@
     }
     requestAnimationFrame(onAnimationTick);
 
-    // Kategoryzacja siatek pinu i porów
+    // Rejestracja geometrii, wycentrowanie środka pinu w osiach X i Z (Obrazek B)
+    // oraz zapamiętanie oryginalnych indeksów trójkątów do próbkowania
     function registerModelMeshes(root3D) {
       state.modelNodes.body = [];
       state.modelNodes.pores = [];
 
+      // 1. Obliczenie geometrycznego środka pinu i wycentrowanie go w płaszczyźnie poziomej (X, Z)
+      const box = new THREE.Box3().setFromObject(root3D);
+      const center = new THREE.Vector3();
+      box.getCenter(center);
+
+      const scalerEl = document.getElementById('modelScaler');
+      if (scalerEl && scalerEl.object3D) {
+        scalerEl.object3D.worldToLocal(center);
+        // Przesuwamy model o wektor środka w X i Z (Y zostawiamy bez zmian dla zachowania wysokości)
+        loadedModel.object3D.position.x -= center.x;
+        loadedModel.object3D.position.z -= center.z;
+      }
+
+      // 2. Kategoryzacja siatek pinu i porów
       root3D.traverse((child) => {
         if (child.isMesh) {
           const name = (child.name || '').toLowerCase();
           const matName = (child.material && child.material.name ? child.material.name : '').toLowerCase();
 
           if (name.includes('por') || matName.includes('por') || matName.includes('glow')) {
+            if (child.geometry && child.geometry.index) {
+              if (!child.geometry.userData.origIndices) {
+                child.geometry.userData.origIndices = child.geometry.index.array.slice();
+              }
+            }
             state.modelNodes.pores.push(child);
+
             if (child.material) {
               child.material.emissive = new THREE.Color(1.0, 0.1, 0.05);
               child.material.emissiveIntensity = 2.5;
@@ -410,7 +421,7 @@
       const mesh = loadedModel.getObject3D('mesh');
       if (mesh) {
         registerModelMeshes(mesh);
-        notify("Wczytano model tomografii GLB!");
+        notify("Wczytano i wycentrowano model na orbicie!");
       }
     });
 
@@ -424,19 +435,45 @@
       });
     }
 
+    // Równomierne próbkowanie gęstości w całej objętości (bez ucinania pinu od góry)
     function applyDensity() {
       const ratio = state.density / 100.0;
+
       state.modelNodes.pores.forEach(mesh => {
-        if (mesh.geometry) {
-          const count = mesh.geometry.index 
-            ? mesh.geometry.index.count 
-            : (mesh.geometry.attributes.position ? mesh.geometry.attributes.position.count : 0);
-          if (count > 0) {
-            const drawCount = Math.max(12, Math.floor(count * ratio));
-            mesh.geometry.setDrawRange(0, drawCount);
+        const geom = mesh.geometry;
+        if (!geom || !geom.userData.origIndices) return;
+
+        const orig = geom.userData.origIndices;
+        const totalTriangles = orig.length / 3;
+
+        if (ratio >= 0.99) {
+          geom.setIndex(new THREE.BufferAttribute(orig, 1));
+        } else {
+          const step = Math.max(1, Math.round(1 / ratio));
+          const sampledTriangles = Math.floor(totalTriangles / step);
+          const newIndices = new (orig.constructor)(sampledTriangles * 3);
+
+          let targetIdx = 0;
+          for (let i = 0; i < totalTriangles; i += step) {
+            const srcIdx = i * 3;
+            newIndices[targetIdx++] = orig[srcIdx];
+            newIndices[targetIdx++] = orig[srcIdx + 1];
+            newIndices[targetIdx++] = orig[srcIdx + 2];
           }
+
+          geom.setIndex(new THREE.BufferAttribute(newIndices, 1));
         }
+        geom.index.needsUpdate = true;
       });
+
+      const demoGroup = document.getElementById('demoPoresGroup');
+      if (demoGroup) {
+        const children = demoGroup.children;
+        const visibleCount = Math.max(1, Math.ceil(children.length * ratio));
+        for (let i = 0; i < children.length; i++) {
+          children[i].setAttribute('visible', i < visibleCount ? 'true' : 'false');
+        }
+      }
     }
 
     function applyWireframe() {
@@ -519,7 +556,7 @@
       notify("Wczytywanie: " + file.name);
     });
 
-    // FPS Tracker
+    // Licznik FPS
     let frames = 0, lastTime = performance.now();
     function trackFPS() {
       frames++;
@@ -527,7 +564,7 @@
       if (now - lastTime >= 1000) {
         const fps = Math.round((frames * 1000) / (now - lastTime));
         const metric = document.getElementById('fpsMetric');
-        if (metric) metric.innerText = `FPS: ${fps} | R = ${state.orbitRadius}m`;
+        if (metric) metric.innerText = `FPS: ${fps} | Promień: 10m`;
         frames = 0;
         lastTime = now;
       }
